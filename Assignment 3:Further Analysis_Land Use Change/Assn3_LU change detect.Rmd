@@ -1,0 +1,153 @@
+---
+title: "Land Use Change Detection in Kern County 2016-2018 (Cp255/Remais Lab)"
+Name: "Michelle Williams"
+output:
+  pdf_document: default
+  html_notebook: default
+---
+
+### Resources for Code:
+- Converting Shapefiles to Raster [Link](https://www.r-bloggers.com/converting-shapefiles-to-rasters-in-r/)
+- Raster Change Detection [Link](https://cyberhelp.sesync.org/blog/raster-change-analysis.html) 
+
+### Data Resources:
+- Farmland Mapping and Monitoring Program shapefiles: [Link](ftp://ftp.consrv.ca.gov/pub/dlrp/FMMP/)
+
+### General Workflow:
+1. Read in shapefiles from Farmland Mapping and Monitoring Program for Kern County for 2016 and 2018.
+2. Convert polygon to raster
+3. Clean the FMMP LU data to consolidate related land uses together and filter out what I don't need. I want to find what was ag in 2016 that was not in 2018.
+4. Assign each LU to a number, and subtract 2018 raster values from 2016 raster values
+
+```{r}
+library(rgdal)
+library(rgeos)
+library(viridis)
+library(readr)
+library(ggplot2)
+library(dplyr)
+library(stringr)
+library(maptools)
+library(sp)
+library(sf)
+library(raster)
+library(rasterVis)
+```
+
+
+```{r read in shapefiles}
+kern14 <- readOGR(dsn = getwd(), layer = 'kern2014')
+kern16 <- readOGR(dsn = getwd(), layer = 'kern2016')
+kern18 <- readOGR(dsn = getwd(), layer = 'kern2018')
+```
+### CA Dept of Conservation Land Cover Codes:
+
+- **Cl** = Confined Animal Agriculture: Confined Animal Agricultural lands include poultry facilities, feedlots, dairy facilities, and fish farms.
+
+- **D** = Urban and Built-Up Land: Urban and Built-Up land is occupied by structures with a building density of at least 1 unit to 1.5 acres, or approximately 6 structures to a 10-acre parcel. Common examples include residential, industrial, commercial, institutional facilities, cemeteries, airports, golf courses, sanitary landfills, sewage treatment, and water control structures.
+
+- **G** = Grazing Land: Grazing Land is land on which the existing vegetation is suited to the grazing of livestock.
+   
+- **nv** = Nonagricultural and Natural Vegetation: Nonagricultural and Natural Vegetation includes heavily wooded, rocky or barren areas, riparian and wetland areas, grassland areas which do not qualify for grazing land due to their size or land management restrictions, small water bodies and recreational water ski lakes. Constructed wetlands are also included in this category.
+
+- **P** =  Prime Farmland: Prime Farmland has the best combination of physical and chemical features able to sustain long-term agricultural production. This land has the soil quality, growing season, and moisture supply needed to produce sustained high yields. Land must have been used for irrigated agricultural production at some time during the four years prior to the mapping date.
+
+- **R** = Rural Residential Land: Rural Residential Land includes residential areas of one to five structures per ten acres.
+
+- **S** = Farmland of Statewide Importance: Farmland of Statewide Importance is similar to Prime Farmland but with minor shortcomings, such as greater slopes or less ability to store soil moisture. Land must have been used for irrigated agricultural production at some time during the four years prior to the mapping date.
+
+- **sAC** = Semi-Agricultural and Rural Commercial Land: Semi-Agricultural and Rural Commercial Land includes farmsteads, agricultural storage and packing sheds, unpaved parking areas, composting facilities, equine facilities, firewood lots, and campgrounds.
+
+- **U** = Unique Farmland: Unique Farmland consists of lesser quality soils used for the production of the state's leading agricultural crops. This land is usually irrigated, but may include nonirrigated orchards or vineyards as found in some climatic zones in California. Land must have been cropped at some time during the four years prior to the mapping date.
+
+- **V** = Vacant or Disturbed Land: Vacant or Disturbed Land includes open field areas that do not qualify for an agricultural category, mineral and oil extraction areas, off road vehicle areas, electrical substations, channelized canals, and rural freeway interchanges.
+
+- **W** = Water: Perennial water bodies with an extent of at least 40 acres.
+
+```{r Fortify polygons for ggplot mapping}
+kern16_df <- fortify(kern16, region = 'polygon_ty')
+kern18_df <- fortify(kern18, region = 'polygon_ty')
+```
+
+```{r map polygons with ggplot}
+ggplot(kern16_df) + geom_polygon(mapping = aes(x=long, y=lat, group = group, fill = id)) + theme_void() + ggtitle(label = 'Kern 2016')
+
+ggplot(kern18_df) + geom_polygon(mapping = aes(x=long, y=lat, group = group, fill = id)) +  theme_void() + ggtitle(label = 'Kern 2018')
+```
+
+
+```{r Make the raster mask to rasterize polygons}
+#basic raster operations from here: https://mhallwor.github.io/_pages/basics_Rasters
+kern_mask <- raster() # resolution in c(x,y) direction
+extent(kern_mask) <- extent(kern16)
+res(kern_mask) <- 500
+crs(kern_mask) <- CRS("+proj=aea +lat_1=34 +lat_2=40.5 +lat_0=0 +lon_0=-120 +x_0=0 +y_0=-4000000 +datum=NAD83 +units=m +no_defs +ellps=GRS80 +towgs84=0,0,0") #code for NAD83 CA zone 5 (https://www.conservation.ca.gov/cgs/Pages/Program-RGMP/california-state-plane-coordinate-system.aspx)
+
+# set the background cells in the raster to 0
+kern_mask[] <- 0
+kern_mask
+```
+
+
+```{r rasterize polygons}
+
+kern16_rast <- rasterize(kern16, kern_mask, field = 'polygon_ty')
+kern18_rast <- rasterize(kern18, kern_mask, field = 'polygon_ty')
+
+```
+
+### Number Codes for Land COver Classes:
+'Cl' = 1,'D' = 2,'G' = 3,'nv' = 4,'P' = 5,'R' = 6,'S' = 7,'sAC' = 8,'U' = 9,'V' = 10,'W' = 11
+
+```{r plot rasters}
+plot(kern16_rast)
+plot(kern18_rast)
+```
+
+```{r aggregate farmland categories}
+#Set farmland values to 0: P = 5 (prime farmland), S = 7 (farmland of statewide importance), sAC = 8 (semi-ag and rural commercial), U = 9 (unique farmland)
+kern16_rast[kern16_rast %in% c(5,7,8,9)] <- 0 
+kern18_rast[kern18_rast %in% c(5,7,8,9)] <- 0
+```
+
+
+```{r subtract 18 from 16 to get LU change}
+#subtract 2018 values from 2016 farmland values of 0. Change values of 0 indicate no change from farmland to non-farmland.
+change_16_18 <- kern16_rast[kern16_rast == 0, drop = FALSE] - kern18_rast 
+plot(change_16_18[change_16_18 != 0, drop = F])
+```
+
+
+```{r}
+unique(change_16_18@data@values)
+```
+
+From 2016 to 2018, farmland experienced:
+- no change (0 - 0 = 0);
+- went from farmland to developed (0 - 2 = -2);
+- went from farmland to grazing land (0 - 3 = -3);
+- went from farmland to vacant/disturbed land (0 - 10 = -10);
+- went from farmland to CAFOs (0 - 1 = -1);
+- went from farmland to natural vegetation (0 - 4 = -4)
+
+```{r get lat and long at each point of change}
+change_16_18@data@names <- change_16_18@data@values
+change_points <- rasterToPoints(change_16_18, spatial = T)
+change_points@data <- data.frame(change_points@data, long=coordinates(change_points)[,1],
+                         lat=coordinates(change_points)[,2])                         
+head(change_points@data)
+change_points_df <- fortify(change_points@data, region = 'layer')
+```
+
+
+```{r plot points of change over county shape}
+ggplot() + geom_polygon(data = kern16_df, aes(x = long, y = lat, group = group), fill = 'light grey') + geom_point(data = change_points_df, aes(x = long, y = lat, color = layer), size = 0.25, shape = 'square') + theme_void()
+```
+
+The plot above looks like what I was envisioning, but there are a lot of 0s that make it hard to see the actual points of change.
+```{r}
+ggplot() + geom_polygon(data = kern16_df, aes(x = long, y = lat, group = group), fill = 'light grey') + geom_point(data = change_points_df[change_points_df != 0,], aes(x = long, y = lat, color = layer), size = 0.25, shape = 'square') + theme_void()
+```
+
+
+Next steps: how to fit these results into context? Maybe determine the GEOID of the census tract these changes fall into? Will look into doing this for the final deliverable. 
