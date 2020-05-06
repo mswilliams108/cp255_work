@@ -1,0 +1,321 @@
+---
+title: "Analyzing Land Use Changes in Kern County, 2010-2018"
+author: 'Michelle Williams'
+output: pdf
+---
+### This is the Second Document of Two
+
+```{r include=FALSE}
+library(rgdal)
+library(rgeos)
+library(viridis)
+library(readr)
+library(tidyverse)
+library(stringr)
+library(maptools)
+library(sp)
+library(sf)
+library(raster)
+library(rasterVis)
+```
+
+```{r}
+change_10_12 <- raster('output/kern LU change 2010-2012.tif')
+change_12_14 <- raster('output/kern LU change 2012-2014.tif')
+change_14_16 <- raster('output/kern LU change 2014-2016.tif')
+change_16_18 <- raster('output/kern LU change 2016-2018.tif')
+```
+
+
+```{r plot changes 1}
+cols <- c('W' = '#3399ff','V' = '#A79339', 
+          'U' = 'white','sAC' = '#99cc99',
+          'S' = 'white', 'R' = '#CCCCCC',
+          'P' = 'white','nv' = '#669933', 
+           'G' = '#a1a739', 'D' = '#999999',
+          'Cl' = '#ff9966',  'P/S/U' = '#00cc00')
+year <- c(2008,2010)
+for (i in c(change_10_12, change_12_14, change_14_16, change_16_18)){
+  year = year+2
+  par(xpd = FALSE)
+  plot(i, legend = F, col = cols, 
+       main = paste('Change,', year[1],'to',year[2]))
+  par(xpd = TRUE)
+  legend('right',
+       legend = c('W', 'V', 'null', 'sAC', 'null', 'R', 'null', 'nv',
+                  'G', 'D', 'Cl', 'P/S/U'),
+       title = 'Changed LU',
+       fill = cols,
+       horiz = F,
+       inset = -.3,
+       cex = 0.7)
+  }
+```
+
+The vast majority of farmland had no change between one year and the next biennial survey. Below, I re-map the above rasters, filtering pixels to only those with change from farmland to something else (i.e. not 0).
+
+```{r plot changes 2}
+year <- c(2008,2010)
+for (i in c(change_10_12, change_12_14, change_14_16, change_16_18)){
+  year <- year+2
+  par(xpd = FALSE)
+  plot(i[i != 0,drop = F], legend = F, col = cols,
+       main = paste('Change,', year[1],'to',year[2]))
+  par(xpd = TRUE)
+  legend('right',
+       legend = c('W', 'V', 'null', 'sAC', 'null', 'R', 'null', 'nv',
+                  'G', 'D', 'Cl', 'P/S/U'),
+       title = 'Changed LU',
+       fill = cols,
+       horiz = F,
+       inset = -.3,
+       cex = 0.7)
+}
+```
+
+\newpage
+
+
+## Summarizing two-year Farmland Changes:
+
+**LU codes:** 'Cl' = 1,'D' = 2,'G' = 3,'nv' = 4,'P' = 5,'R' = 6,'S' = 7,'sAC' = 8,'U' = 9,'V' = 10,'W' = 11
+
+```{r change 2010 to 2012}
+unique(change_10_12)
+```
+
+**From 2010 to 2012, farmland:**
+
+- had no change (0 - 0 = 0);
+
+- went from farmland to CAFOs (0 - 1 = -1);
+
+- went from farmland to developed (0 - 2 = -2);
+
+- went from farmland to grazing land (0 - 3 = -3);
+
+- went from farmland to natural vegetation (0 - 4 = -4);
+
+- went from farmland to rural residential (0 - 6 = -6);
+
+- went from farmland to semi-ag/rural commercial (0 - 8 = -8)
+
+- went from farmland to vacant/disturbed land (0 - 10 = -10);
+
+
+```{r change 2012 to 2014}
+unique(change_12_14)
+```
+
+**From 2012 to 2014, farmland:**
+
+- had no change (0 - 0 = 0);
+
+- went from farmland to CAFOs (0 - 1 = -1);
+
+- went from farmland to developed (0 - 2 = -2);
+
+- went from farmland to grazing land (0 - 3 = -3);
+
+- went from farmland to natural vegetation (0 - 4 = -4);
+
+- went from farmland to rural residential (0 - 6 = -6);
+
+- went from farmland to semi-ag/rural commercial (0 - 8 = -8)
+
+- went from farmland to vacant/disturbed land (0 - 10 = -10);
+
+- went from farmland to water (0 - 11 = -11)
+
+
+```{r change 2014 to 2016}
+unique(change_14_16)
+```
+
+**From 2014 to 2016, farmland:**
+
+- had no change (0 - 0 = 0);
+
+- went from farmland to CAFOs (0 - 1 = -1);
+
+- went from farmland to developed (0 - 2 = -2);
+
+- went from farmland to grazing land (0 - 3 = -3);
+
+- went from farmland to natural vegetation (0 - 4 = -4);
+
+- went from farmland to rural residential (0 - 6 = -6);
+
+- went from farmland to semi-ag/rural commercial (0 - 8 = -8)
+
+- went from farmland to vacant/disturbed land (0 - 10 = -10);
+
+
+```{r change 2016 to 2018}
+unique(change_16_18)
+```
+
+**From 2016 to 2018, farmland:**
+
+- had no change (0 - 0 = 0);
+
+- went from farmland to CAFOs (0 - 1 = -1);
+
+- went from farmland to developed (0 - 2 = -2);
+
+- went from farmland to grazing land (0 - 3 = -3);
+
+- went from farmland to natural vegetation (0 - 4 = -4);
+
+- went from farmland to vacant/disturbed land (0 - 10 = -10);
+
+\newpage
+
+```{r Summarize Pixels into Data Frames}
+code <- c()
+sum_cells <- c()
+for (i in c(change_10_12)) {
+  for (v in unique(i)) {
+    code <- c(code, v)
+    sum_cells <- c(sum_cells, ncell(i[i == v]))
+  }
+}
+sum.10.12 <- data.frame(code = code, 
+                        year = rep('10-12', length(code)),
+                        sum_cells = sum_cells,
+                        sq_m = sum_cells*201^2,
+                        sq_km = (sum_cells*201^2)/(1000^2))
+
+code <- c()
+sum_cells <- c()
+for (i in c(change_12_14)) {
+  for (v in unique(i)) {
+    code <- c(code, v)
+    sum_cells <- c(sum_cells, ncell(i[i == v]))
+  }
+}
+sum.12.14 <- data.frame(code = code, 
+                        year = rep('12-14', length(code)),
+                        sum_cells = sum_cells,
+                        sq_m = sum_cells*201^2,
+                        sq_km = (sum_cells*201^2)/(1000^2))
+
+code <- c()
+sum_cells <- c()
+for (i in c(change_14_16)) {
+  for (v in unique(i)) {
+    code <- c(code, v)
+    sum_cells <- c(sum_cells, ncell(i[i == v]))
+  }
+}
+sum.14.16 <- data.frame(code = code, 
+                        year = rep('14-16', length(code)),
+                        sum_cells = sum_cells,
+                        sq_m = sum_cells*201^2,
+                        sq_km = (sum_cells*201^2)/(1000^2))
+
+code <- c()
+sum_cells <- c()
+for (i in c(change_16_18)) {
+  for (v in unique(i)) {
+    code <- c(code, v)
+    sum_cells <- c(sum_cells, ncell(i[i == v]))
+  }
+}
+sum.16.18 <- data.frame(code = code, 
+                        year = rep('16-18', length(code)),
+                        sum_cells = sum_cells,
+                        sq_m = sum_cells*201^2,
+                        sq_km = (sum_cells*201^2)/(1000^2))
+sum.10.12
+sum.12.14
+sum.14.16
+sum.16.18
+```
+
+```{r eval = FALSE}
+save(sum.10.12, file = 'output/sum_cells_10_12.rda')
+save(sum.12.14, file = 'output/sum_cells_12_14.rda')
+save(sum.14.16, file = 'output/sum_cells_14_16.rda')
+save(sum.16.18, file = 'output/sum_cells_16_18.rda')
+```
+
+
+\newpage
+
+## Convert Change Rasters to Polygons
+
+```{r get lat and long at each area of change}
+change_10_12@data@names <- change_10_12@data@values
+change_10_12_poly <- rasterToPolygons(change_10_12, dissolve = T)
+change_10_12_df <- fortify(change_10_12_poly, region = 'layer')
+
+change_12_14@data@names <- change_12_14@data@values
+change_12_14_poly <- rasterToPolygons(change_12_14, dissolve = T)
+change_12_14_df <- fortify(change_12_14_poly, region = 'layer')
+
+change_14_16@data@names <- change_14_16@data@values
+change_14_16_poly <- rasterToPolygons(change_14_16, dissolve = T)
+change_14_16_df <- fortify(change_14_16_poly, region = 'layer')
+
+change_16_18@data@names <- change_16_18@data@values
+change_16_18_poly <- rasterToPolygons(change_16_18, dissolve = T)
+change_16_18_df <- fortify(change_16_18_poly, region = 'layer')
+```
+
+
+```{r plot areas of change over county shape}
+change_pl_10_12 <- ggplot() + geom_polygon(data = kern10_df, 
+                        aes(x = long, y = lat, group = group), 
+                        fill = 'light grey') + 
+  geom_polygon(data = filter(change_10_12_df, id != '0'), 
+               aes(x = long, y = lat, group = group, 
+                   fill = id)) + theme_void() +
+  scale_fill_brewer(palette = 'Set2')
+
+
+change_pl_12_14 <- ggplot() + geom_polygon(data = kern12_df, 
+                        aes(x = long, y = lat, group = group), 
+                        fill = 'light grey') + 
+  geom_polygon(data = filter(change_12_14_df, id != '0'), 
+               aes(x = long, y = lat, group = group, 
+                   fill = id)) + theme_void()
+
+change_pl_14_16 <- ggplot() + geom_polygon(data = kern14_df, 
+                        aes(x = long, y = lat, group = group), 
+                        fill = 'light grey') + 
+  geom_polygon(data = filter(change_14_16_df, id != '0'), 
+               aes(x = long, y = lat, group = group, 
+                   fill = id)) + theme_void()
+
+
+change_pl_16_18 <- ggplot() + geom_polygon(data = kern16_df, 
+                        aes(x = long, y = lat, group = group), 
+                        fill = 'light grey') + 
+  geom_polygon(data = filter(change_16_18_df, id != '0'), 
+               aes(x = long, y = lat, group = group, 
+                   fill = id)) + theme_void()
+change_pl_10_12
+change_pl_12_14
+change_pl_14_16
+change_pl_16_18
+```
+
+The plots above look like what I need, yay! :D
+
+```{r eval =FALSE}
+writeOGR(change_10_12_poly, dsn = 'output', 
+         layer='change_10_12', driver = 'ESRI Shapefile')
+writeOGR(change_12_14_poly, dsn = 'output',
+         layer = 'change_12_14', driver = 'ESRI Shapefile')
+writeOGR(change_14_16_poly, dsn = 'output', 
+         layer = 'change_14_16', driver = 'ESRI Shapefile')
+writeOGR(change_16_18_poly, dsn = 'output',
+         layer = 'change_16_18', driver = 'ESRI Shapefile')
+```
+
+
+#### Next steps? 
+
+-Potentially fit these results into context by matching with GEOID of the census tract these changes fall into? 
+-Summarize the areas of clusters of pixels/polygons. 

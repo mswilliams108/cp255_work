@@ -1,0 +1,351 @@
+---
+title: "Calculating Land Use Change in Kern County, 2010-2018"
+author: "Michelle Williams"
+output:
+  pdf_document: default
+---
+## This is the First Document of Two 
+
+### Resources for Code:
+- Converting Shapefiles to Raster: [Link](https://www.r-bloggers.com/converting-shapefiles-to-rasters-in-r/)
+
+- Raster Change Detection [Link](https://cyberhelp.sesync.org/blog/raster-change-analysis.html)
+
+### Data Resources:
+- Farmland Mapping and Monitoring Program shapefiles: [Link](ftp://ftp.consrv.ca.gov/pub/dlrp/FMMP)
+
+- GIS Metadata: [Link](ftp://ftp.consrv.ca.gov/pub/DLRP/FMMP/metadata/html/)
+
+## Objective: 
+Determine what areas were agriculture in Kern that changed to non-agricultural land uses in subsequent years, and describe the nature and area of each change.
+
+### General Workflow:
+1. Read in shapefiles from Farmland Mapping and Monitoring Program for Kern County for 2010, 2012, 2014, 2016 and 2018.
+
+2. Convert polygons to rasters, setting appropriate spatial scale
+
+3. Clean the FMMP LU data to consolidate ag-related land uses together
+
+4. Assign each LU to a number, and subtract 2018 raster values from 2016 raster values
+
+```{r include=FALSE}
+library(rgdal)
+library(rgeos)
+library(viridis)
+library(readr)
+library(tidyverse)
+library(stringr)
+library(maptools)
+library(sp)
+library(sf)
+library(raster)
+library(rasterVis)
+```
+
+
+```{r read in shapefiles, echo=FALSE}
+#setting my working directory to my project: "C:/Users/mswil/Documents/UC_Berkeley/Research/LU_change_detect"
+kern10 <- readOGR(dsn = 'mapping', layer = 'kern2010')
+kern12 <- readOGR(dsn = 'mapping', layer = 'kern2012')
+kern14 <- readOGR(dsn = 'mapping', layer = 'kern2014')
+kern16 <- readOGR(dsn = 'mapping', layer = 'kern2016')
+kern18 <- readOGR(dsn = 'mapping', layer = 'kern2018')
+kernct <- readOGR(dsn = 'mapping', layer = 'cb_2017_06_tract_500k')
+```
+
+\newpage
+
+### CA Dept of Conservation Land Cover Codes:
+
+- **Cl** = Confined Animal Agriculture: Confined Animal Agricultural lands include poultry facilities, feedlots, dairy facilities, and fish farms.
+
+- **D** = Urban and Built-Up Land: Urban and Built-Up land is occupied by structures with a building density of at least 1 unit to 1.5 acres, or approximately 6 structures to a 10-acre parcel. Common examples include residential, industrial, commercial, institutional facilities, cemeteries, airports, golf courses, sanitary landfills, sewage treatment, and water control structures.
+
+- **G** = Grazing Land: Grazing Land is land on which the existing vegetation is suited to the grazing of livestock.
+   
+- **nv** = Nonagricultural and Natural Vegetation: Nonagricultural and Natural Vegetation includes heavily wooded, rocky or barren areas, riparian and wetland areas, grassland areas which do not qualify for grazing land due to their size or land management restrictions, small water bodies and recreational water ski lakes. Constructed wetlands are also included in this category.
+
+- **P** =  Prime Farmland: Prime Farmland has the best combination of physical and chemical features able to sustain long-term agricultural production. This land has the soil quality, growing season, and moisture supply needed to produce sustained high yields. Land must have been used for irrigated agricultural production at some time during the four years prior to the mapping date.
+
+- **R** = Rural Residential Land: Rural Residential Land includes residential areas of one to five structures per ten acres.
+
+- **S** = Farmland of Statewide Importance: Farmland of Statewide Importance is similar to Prime Farmland but with minor shortcomings, such as greater slopes or less ability to store soil moisture. Land must have been used for irrigated agricultural production at some time during the four years prior to the mapping date.
+
+- **sAC** = Semi-Agricultural and Rural Commercial Land: Semi-Agricultural and Rural Commercial Land includes farmsteads, agricultural storage and packing sheds, unpaved parking areas, composting facilities, equine facilities, firewood lots, and campgrounds.
+
+- **U** = Unique Farmland: Unique Farmland consists of lesser quality soils used for the production of the state's leading agricultural crops. This land is usually irrigated, but may include nonirrigated orchards or vineyards as found in some climatic zones in California. Land must have been cropped at some time during the four years prior to the mapping date.
+
+- **V** = Vacant or Disturbed Land: Vacant or Disturbed Land includes open field areas that do not qualify for an agricultural category, mineral and oil extraction areas, off road vehicle areas, electrical substations, channelized canals, and rural freeway interchanges.
+
+- **W** = Water: Perennial water bodies with an extent of at least 40 acres.
+
+\newpage
+
+```{r check datum and CRS}
+crs(kernct) #this is EPSG 4269
+crs(kern10)
+crs(kern12)
+crs(kern14)
+crs(kern16)
+crs(kern18)
+```
+
+The CRS for Kern 2012 and before is NAD27, CA Zone 5; Kern 2014 and following is NAD83, CA Zone 5 ( [link](https://www.conservation.ca.gov/cgs/Pages/Program-RGMP/california-state-plane-coordinate-system.aspx))
+
+There's no EPSG code that I can find for these particular CRSs's. I don't know how important it is to have a particular EPSG code but I do want to be able to convert from meters back to lat and longitude when I have final results. I will try EPSG code [2770](https://spatialreference.org/ref/epsg/2770/)
+
+\newpage
+
+## Visualizing Polygons 2010 to 2018
+
+```{r color key}
+cols <- c('Cl' = '#ff9966', 'D' = '#999999', 'G' = '#a1a739', 'nv' = '#669933', 
+          'P' = '#00cc00', 'R' = '#CCCCCC',  'S' = '#71db3b', 'sAC' = '#99cc99',
+          'U' = '#a2ea5f', 'V' = '#A79339', 'W' = '#3399ff')
+```
+
+```{r reassign CRS}
+kern10_2770 <-spTransform(kern10, 
+                          CRS('+proj=lcc +lat_1=35.46666666666667 +lat_2=34.03333333333333 +lat_0=33.5 +lon_0=-118 +x_0=2000000 +y_0=500000 +ellps=GRS80 +units=m +no_defs'))
+
+kern12_2770 <-spTransform(kern12, 
+                          CRS('+proj=lcc +lat_1=35.46666666666667 +lat_2=34.03333333333333 +lat_0=33.5 +lon_0=-118 +x_0=2000000 +y_0=500000 +ellps=GRS80 +units=m +no_defs'))
+
+kern14_2770 <-spTransform(kern14, 
+                          CRS('+proj=lcc +lat_1=35.46666666666667 +lat_2=34.03333333333333 +lat_0=33.5 +lon_0=-118 +x_0=2000000 +y_0=500000 +ellps=GRS80 +units=m +no_defs'))
+
+kern16_2770 <-spTransform(kern16, 
+                          CRS('+proj=lcc +lat_1=35.46666666666667 +lat_2=34.03333333333333 +lat_0=33.5 +lon_0=-118 +x_0=2000000 +y_0=500000 +ellps=GRS80 +units=m +no_defs'))
+
+kern18_2770 <-spTransform(kern18, 
+                          CRS('+proj=lcc +lat_1=35.46666666666667 +lat_2=34.03333333333333 +lat_0=33.5 +lon_0=-118 +x_0=2000000 +y_0=500000 +ellps=GRS80 +units=m +no_defs'))
+```
+
+
+\newpage
+
+## Rasterizing Polygons
+
+the minimum mapping unit is 10 acres, which corresponds to 0.04046856 square km, or 40,468.56 square meters
+(from [FMMP metadata](ftp://ftp.consrv.ca.gov/pub/DLRP/FMMP/metadata/html/)). 
+
+To adequately capture the spatial resolution of rasterized layer, I need a minimum pixel size of 40,468.56 square meters or less (approximately 201 meters x 201 meters). 
+
+I'm new to working with raster data in R and used this [tutorial](https://mhallwor.github.io/_pages/basics_Rasters) learn the workflow
+
+```{r Make the raster mask to rasterize polygons}
+kern_mask <- raster() 
+extent(kern_mask) <- extent(kern10_2770) 
+#all of the polygons have the same extent so I can use the same raster mask for all of them
+res(kern_mask) <- 201 # resolution in c(x,y) direction
+crs(kern_mask) <- CRS(proj4string(kern10_2770)) 
+
+# set the background cells in the raster to value of 0, essentially making a blank canvas
+kern_mask[] <- 0
+kern_mask
+```
+
+```{r set land use codes to numeric values}
+kern10_2770@data <- kern10_2770@data %>% 
+  mutate(code_num = case_when(polygon_ty == 'Cl' ~ 1, 
+                        polygon_ty == 'D'~ 2,
+                        polygon_ty == 'G' ~ 3, 
+                        polygon_ty == 'nv'~ 4,
+                        polygon_ty == 'P' ~ 5, 
+                        polygon_ty == 'R'~ 6, 
+                        polygon_ty == 'S'~ 7,
+                        polygon_ty == 'sAC'~ 8,
+                        polygon_ty == 'U' ~ 9,
+                        polygon_ty == 'V'~ 10,
+                        polygon_ty == 'W' ~ 11))
+  
+  kern12_2770@data <- kern12_2770@data %>%
+    mutate(code_num = case_when(polygon_ty == 'Cl' ~ 1, 
+                        polygon_ty == 'D'~ 2,
+                        polygon_ty == 'G' ~ 3, 
+                        polygon_ty == 'nv'~ 4,
+                        polygon_ty == 'P' ~ 5, 
+                        polygon_ty == 'R'~ 6, 
+                        polygon_ty == 'S'~ 7,
+                        polygon_ty == 'sAC'~ 8,
+                        polygon_ty == 'U' ~ 9,
+                        polygon_ty == 'V'~ 10,
+                        polygon_ty == 'W' ~ 11))
+  
+kern14_2770@data <- kern14_2770@data %>%
+  mutate(code_num = case_when(polygon_ty == 'Cl' ~ 1, 
+                        polygon_ty == 'D'~ 2,
+                        polygon_ty == 'G' ~ 3, 
+                        polygon_ty == 'nv'~ 4,
+                        polygon_ty == 'P' ~ 5, 
+                        polygon_ty == 'R'~ 6, 
+                        polygon_ty == 'S'~ 7,
+                        polygon_ty == 'sAC'~ 8,
+                        polygon_ty == 'U' ~ 9,
+                        polygon_ty == 'V'~ 10,
+                        polygon_ty == 'W' ~ 11))
+
+kern16_2770@data <- kern16_2770@data %>%
+  mutate(code_num = case_when(polygon_ty == 'Cl' ~ 1, 
+                        polygon_ty == 'D'~ 2,
+                        polygon_ty == 'G' ~ 3, 
+                        polygon_ty == 'nv'~ 4,
+                        polygon_ty == 'P' ~ 5, 
+                        polygon_ty == 'R'~ 6, 
+                        polygon_ty == 'S'~ 7,
+                        polygon_ty == 'sAC'~ 8,
+                        polygon_ty == 'U' ~ 9,
+                        polygon_ty == 'V'~ 10,
+                        polygon_ty == 'W' ~ 11))
+
+kern18_2770@data <- kern18_2770@data %>% 
+  mutate(code_num = case_when(polygon_ty == 'Cl' ~ 1, 
+                        polygon_ty == 'D'~ 2,
+                        polygon_ty == 'G' ~ 3, 
+                        polygon_ty == 'nv'~ 4,
+                        polygon_ty == 'P' ~ 5, 
+                        polygon_ty == 'R'~ 6, 
+                        polygon_ty == 'S'~ 7,
+                        polygon_ty == 'sAC'~ 8,
+                        polygon_ty == 'U' ~ 9,
+                        polygon_ty == 'V'~ 10,
+                        polygon_ty == 'W' ~ 11))
+
+```
+
+
+```{r rasterize polygons}
+
+rasters <- lapply(c(kern10_2770, kern12_2770, kern14_2770, kern16_2770, kern18_2770),
+       function(x) rasterize(x, kern_mask, field = 'code_num'))
+
+kern10_rast <- rasters[[1]]
+kern12_rast <- rasters[[2]]
+kern14_rast <- rasters[[3]]
+kern16_rast <- rasters[[4]]
+kern18_rast <- rasters[[5]]
+
+#setting field to 'polygon_ty' ensures that pixel values are set according 
+#to the land use code
+```
+
+### Number Codes for Land Cover Classes:
+'Cl' = 1,'D' = 2,'G' = 3,'nv' = 4,'P' = 5,'R' = 6,'S' = 7,'sAC' = 8,'U' = 9,'V' = 10,'W' = 11
+
+Using [this tutorial](https://oscarperpinan.github.io/rastervis/) on the rasterVis package
+
+```{r Set raster categorical values}
+kern10_rast <- ratify(kern10_rast) #adds attributes slot for categorical levels
+rat10 <- levels(kern10_rast)[[1]] #creating raster attribute table
+rat10$num_codes <- c(1:11)
+rat10$lu_codes <- c('Cl','D','G','nv','P','R','S','sAC','U','V','W')
+levels(kern10_rast) <- rat10
+
+kern12_rast <- ratify(kern12_rast) #adds attributes slot for categorical levels
+rat12 <- levels(kern12_rast)[[1]] #creating raster attribute table
+rat12$num_codes <- c(1:11)
+rat12$lu_codes <- c('Cl','D','G','nv','P','R','S','sAC','U','V','W')
+levels(kern12_rast) <- rat12
+
+kern14_rast <- ratify(kern14_rast) #adds attributes slot for categorical levels
+rat14 <- levels(kern14_rast)[[1]] #creating raster attribute table
+rat14$num_codes <- c(1:11)
+rat14$lu_codes <- c('Cl','D','G','nv','P','R','S','sAC','U','V','W')
+levels(kern14_rast) <- rat14
+
+kern16_rast <- ratify(kern16_rast) #adds attributes slot for categorical levels
+rat16 <- levels(kern16_rast)[[1]] #creating raster attribute table
+rat16$num_codes <- c(1:11)
+rat16$lu_codes <- c('Cl','D','G','nv','P','R','S','sAC','U','V','W')
+levels(kern16_rast) <- rat16
+
+kern18_rast <- ratify(kern18_rast) #adds attributes slot for categorical levels
+rat18 <- levels(kern18_rast)[[1]] #creating raster attribute table
+rat18$num_codes <- c(1:11)
+rat18$lu_codes <- c('Cl','D','G','nv','P','R','S','sAC','U','V','W')
+levels(kern18_rast) <- rat18
+```
+
+
+```{r plot rasters, fig.dim = c(5,3)}
+stack <- stack(kern10_rast, kern12_rast, kern14_rast, kern16_rast, kern18_rast)
+
+year <- 2008
+for (i in stack@layers) {
+  year <- year + 2
+  p <- levelplot(i, att = 'lu_codes', 
+            col.regions = cols, #the color keys defined earlier when mapping shapefiles
+            main = paste('Kern Land Use', year),
+            margin = FALSE)
+  print(p)
+}
+```
+
+### Initial Impressions:
+
+- Most of the farmland is concentrated in a swath of the middle-northwest area of the county--consistent with the location of the southern San Joaquin Valley. 
+
+- Most of the natural vegetation is in the eastern half of the county, consistent with the open desert space of southeastern CA.(Death Valley NP, Joshua Tree NP, and the Mojave natural preserve are a couple hundred miles east of Bakersfield).
+
+- I can't detect any huge changes in land use between any of the maps with the naked eye, but R can help me detect changes that aren't readily apparent!
+
+## Detecting Change
+
+Specifically, looking at farmland loss.
+
+```{r aggregate farmland categories, fig.dim=c(5,3), echo = TRUE, results="hide"}
+#Set farmland values to 0: 
+#P = 5 (prime farmland), 
+#S = 7 (farmland of statewide importance), 
+#U = 9 (unique farmland)
+
+kern10_rast[kern10_rast %in% c(5,7,9)] <- 0
+kern12_rast[kern12_rast %in% c(5,7,9)] <- 0
+kern14_rast[kern14_rast %in% c(5,7,9)] <- 0
+kern16_rast[kern16_rast %in% c(5,7,9)] <- 0
+kern18_rast[kern18_rast %in% c(5,7,9)] <- 0
+```
+
+
+```{r subtract 18 from 16 to get LU change, echo = TRUE, results="hide"}
+#subtract 2018 values from 2016 farmland values of 0. Change values of 0 indicate no change from farmland to non-farmland.
+change_10_12 <- kern10_rast[kern10_rast == 0, drop = FALSE] - kern12_rast 
+change_12_14 <- kern12_rast[kern12_rast == 0, drop = FALSE] - kern14_rast 
+change_14_16 <- kern14_rast[kern14_rast == 0, drop = FALSE] - kern16_rast 
+change_16_18 <- kern16_rast[kern16_rast == 0, drop = FALSE] - kern18_rast 
+```
+
+**Number Codes for Land Cover Classes:**
+'Cl' = 1,'D' = 2,'G' = 3,'nv' = 4,'P' = 5,'R' = 6,'S' = 7,'sAC' = 8,'U' = 9,'V' = 10,'W' = 11
+
+**Change codes:**
+- 0-11 = -11 (farmland to water)
+
+- 0-10 = -10 (farmland to vacant/disturbed)
+
+- 0-8 = -8 (farmland to semi-ag/rural commercial)
+
+- 0-6 = -6 (farmland to rural residential)
+
+- 0-4 = -4 (farmland to natural vegetation)
+
+- 0-3 = -3 (farmland to grazing land)
+
+-0-2 = -2 (farmland to developed land)
+
+-0-1 = -1 (farmland to CAFOs)
+
+-0-0 = 0 (farmland to farmland--no change)
+
+
+```{r eval=FALSE}
+writeRaster(change_10_12, file = 'output/kern LU change 2010-2012', 
+            format = 'GTiff', overwrite = T)
+writeRaster(change_12_14, file = 'output/kern LU change 2012-2014', 
+            format = 'GTiff', overwrite = T)
+writeRaster(change_14_16, file = 'output/kern LU change 2014-2016', 
+            format = 'GTiff',  overwrite = T)
+writeRaster(change_16_18, file = 'output/kern LU change 2016-2018', 
+            format = 'GTiff',  overwrite = T)
+```
+
