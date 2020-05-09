@@ -1,1 +1,6 @@
 This is the repository for the final code and products from the CP255 Project on detecting land use change in Kern County, CA.
+
+The Rmd file 'land use change detection' is the first of two RMD files--this generates the change datasets.
+The Rmd file 'land use change analysis' is the second of two Rmd files--this visualizes and analyzes the change datasets generated from the first rmd file. 
+
+I may go back into these rmd files and update them to make the code more concise (adding loops where I do batch operations on datasets).
